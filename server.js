@@ -1,163 +1,141 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { OpenAI } = require('openai');
-require('dotenv').config();
-
 const app = express();
 const port = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+
+if (!process.env.OPENAI_API_KEY) {
+  console.error('❌ OPENAI_API_KEY is not set in .env');
+  process.exit(1);
+}
 
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Import evaluators
+const developerEvaluator = require('./evaluators/developer');
+const creativeEvaluator = require('./evaluators/creative');
+
 // Health check endpoint
 app.get('/', (req, res) => {
   res.send('Resume analysis server is running!');
 });
 
+// Debug utilities for application data
+function debugApplicationData(applications, evaluator) {
+  console.log('\n=== Debug: Application Data Analysis ===\n');
+  
+  applications.forEach((app, index) => {
+    console.log(`\n📄 Application ${index + 1} (ID: ${app.id})`);
+    console.log('----------------------------------------');
+    console.log('Name:', app.name);
+    console.log('Text Content Length:', app.text?.length || 0);
+
+    if (app.text) {
+      console.log('\nFirst 500 chars:');
+      console.log(app.text.substring(0, 500));
+      console.log('\n...text continues...\n');
+    }
+
+    // Detected skills analysis
+    const skills = evaluator.detectSkills(app.text);
+    console.log('🔍 Detected Skills:', skills);
+
+    console.log('\n📊 Data Structure:');
+    console.log(JSON.stringify({
+      id: app.id,
+      name: app.name,
+      email: app.email,
+      textAvailable: Boolean(app.text),
+      textLength: app.text?.length || 0,
+      detectedSkills: Array.from(skills)
+    }, null, 2));
+    console.log('----------------------------------------\n');
+  });
+}
+
 // Resume analysis endpoint
 app.post('/api/filter-resumes', async (req, res) => {
+  const { applications, category = 'developer' } = req.body;
+
+  console.log('\n=== New Resume Analysis Request ===\n');
+  console.log(`Received ${applications?.length || 0} applications for ${category} category`);
+
+  if (!applications?.length) {
+    return res.status(400).json({ 
+      error: 'Invalid input',
+      details: 'No applications provided'
+    });
+  }
+
   try {
-    const { applications } = req.body;
-    
-    if (!applications || !Array.isArray(applications)) {
-      return res.status(400).json({ error: 'Invalid request body. Expected an array of applications.' });
+    // Select evaluator based on category
+    let evaluator;
+    switch (category) {
+      case 'developer':
+        evaluator = developerEvaluator;
+        break;
+      case 'creative':
+        evaluator = creativeEvaluator;
+        break;
+      default:
+        return res.status(400).json({
+          error: 'Invalid category',
+          details: 'Unsupported job category'
+        });
     }
+
+    // Debug incoming data
+    debugApplicationData(applications, evaluator);
     
-    console.log(`Received ${applications.length} applications for analysis`);
+    const completion = await openai.chat.completions.create(
+      evaluator.generatePrompt(applications)
+    );
+
+    console.log('\n=== GPT Response ===\n');
+    console.log(JSON.stringify(completion.choices[0].message.content, null, 2));
+
+    const rankings = JSON.parse(completion.choices[0].message.content);
     
-    // Process each application
-    const rankings = [];
-    for (const app of applications) {
-      console.log(`Processing application ${app.id} for ${app.name}`);
-      
-      // Skip if no text content
-      if (!app.text || app.text.length < 50) {
-        console.log(`Insufficient text for application ${app.id}, skipping analysis`);
-        rankings.push({
-          id: app.id,
-          rating: 1,
-          summary: "Unable to analyze (insufficient text)",
-          keySkills: [],
-          strengths: [],
-          improvements: ["Could not extract enough text from resume to analyze"]
-        });
-        continue;
-      }
-      
-      // Prepare the resume text (trim if too long)
-      const maxTextLength = 6000; // Limit text to avoid exceeding token limits
-      const resumeText = app.text.substring(0, maxTextLength);
-      
-      try {
-        // Call OpenAI for analysis
-        const aiResponse = await openai.chat.completions.create({
-          model: "gpt-4-turbo", // or "gpt-3.5-turbo" if cost is a concern
-          messages: [
-            { 
-              role: "system", 
-              content: `You are an expert HR assistant that analyzes resumes for job applications.
-              The candidate is applying for a position in the ${app.team || "unspecified"} team.
-              Provide a fair and objective assessment of the resume.`
-            },
-            { 
-              role: "user", 
-              content: `Analyze this resume carefully and rate the candidate:
-              
-              ${resumeText}`
-            }
-          ],
-          functions: [
-            {
-              name: "analyze_resume",
-              description: "Analyze a resume and provide ratings and feedback",
-              parameters: {
-                type: "object",
-                properties: {
-                  rating: {
-                    type: "number",
-                    description: "Rating from 1-5 where 1 is poor fit and 5 is excellent fit"
-                  },
-                  summary: {
-                    type: "string",
-                    description: "Brief summary of the candidate (max 200 characters)"
-                  },
-                  keySkills: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "List of key skills identified in the resume (max 5)"
-                  },
-                  strengths: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "List of candidate strengths (max 3)"
-                  },
-                  improvements: {
-                    type: "array",
-                    items: { type: "string" },
-                    description: "Areas where the candidate could improve or lacks experience (max 3)"
-                  }
-                },
-                required: ["rating", "summary", "keySkills", "strengths", "improvements"]
-              }
-            }
-          ],
-          function_call: { name: "analyze_resume" },
-          temperature: 0.5 // Lower temperature for more consistent ratings
-        });
+    // Verify skills in GPT response
+    const verifiedRankings = {
+      rankings: rankings.rankings.map(ranking => {
+        const app = applications.find(a => a.id === ranking.id);
+        const detectedSkills = Array.from(evaluator.detectSkills(app.text));
         
-        // Parse the response
-        const functionCall = aiResponse.choices[0].message.function_call;
-        const analysis = JSON.parse(functionCall.arguments);
-        
-        // Add to results with the application ID
-        rankings.push({
-          id: app.id,
-          rating: analysis.rating,
-          summary: analysis.summary,
-          keySkills: analysis.keySkills,
-          strengths: analysis.strengths,
-          improvements: analysis.improvements
-        });
-        
-        console.log(`Successfully analyzed application ${app.id} with rating ${analysis.rating}`);
-      } catch (aiError) {
-        console.error(`Error analyzing application ${app.id}:`, aiError);
-        
-        // Add a fallback rating if AI analysis fails
-        rankings.push({
-          id: app.id,
-          rating: 1,
-          summary: "Error during analysis",
-          keySkills: [],
-          strengths: [],
-          improvements: ["An error occurred during AI analysis"]
-        });
-      }
-      
-      // Add a small delay between requests to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
-    
-    // Return the results
-    console.log(`Analysis complete. Returning ${rankings.length} rankings.`);
-    return res.status(200).json({ rankings });
-    
+        return {
+          ...ranking,
+          keySkills: ranking.keySkills.filter(skill => 
+            detectedSkills.includes(skill.toLowerCase())
+          )
+        };
+      })
+    };
+
+    console.log('\n=== Final Verified Output ===\n');
+    console.log(JSON.stringify(verifiedRankings, null, 2));
+
+    res.json(verifiedRankings);
+
   } catch (error) {
-    console.error('Error in filter-resumes function:', error);
-    return res.status(500).json({ 
-      error: 'Failed to analyze applications', 
-      message: error.message
+    console.error('\n❌ Server Error:', error);
+    res.status(500).json({ 
+      error: 'Analysis failed',
+      details: error.message
     });
   }
 });
 
 // Start the server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+  console.log(`✅ Server running on http://localhost:${port}`);
 });
+
+module.exports = app;
