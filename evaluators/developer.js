@@ -87,7 +87,7 @@ const SKILL_KEYWORDS = {
       : "These candidates are applying for FULLTIME positions. Evaluate based on professional experience and skill level.";
   
     return {
-      model: "gpt-4-turbo-preview",
+      model: "gpt-4o-2024-08-06",
       messages: [
         {
           role: "system",
@@ -133,3 +133,4 @@ Candidates with verified skills: ${JSON.stringify(processedApps)}`
     detectSkills,
     generatePrompt
   }; 
+  
