@@ -63,10 +63,14 @@ function debugApplicationData(applications, evaluator) {
 
 // Resume analysis endpoint
 app.post('/api/filter-resumes', async (req, res) => {
+  // Extract position_type from the first application if not provided directly
   const { applications, category = 'developer' } = req.body;
+  const position_type = applications.length > 0 && applications[0].position_type 
+    ? applications[0].position_type 
+    : 'fulltime';
 
   console.log('\n=== New Resume Analysis Request ===\n');
-  console.log(`Received ${applications?.length || 0} applications for ${category} category`);
+  console.log(`Received ${applications?.length || 0} applications for ${category} category (${position_type})`);
 
   if (!applications?.length) {
     return res.status(400).json({ 
@@ -95,8 +99,9 @@ app.post('/api/filter-resumes', async (req, res) => {
     // Debug incoming data
     debugApplicationData(applications, evaluator);
     
+    // Pass position_type to the evaluator
     const completion = await openai.chat.completions.create(
-      evaluator.generatePrompt(applications)
+      evaluator.generatePrompt(applications, position_type)
     );
 
     console.log('\n=== GPT Response ===\n');
