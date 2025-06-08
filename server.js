@@ -30,7 +30,7 @@ app.get('/', (req, res) => {
 });
 
 // Debug utilities for application data
-function debugApplicationData(applications, evaluator) {
+function debugApplicationData(applications, evaluator, category) {
   console.log('\n=== Debug: Application Data Analysis ===\n');
   
   applications.forEach((app, index) => {
@@ -45,9 +45,16 @@ function debugApplicationData(applications, evaluator) {
       console.log('\n...text continues...\n');
     }
 
-    // Detected skills analysis
-    const skills = evaluator.detectSkills(app.text);
-    console.log('🔍 Detected Skills:', skills);
+    // Handle different evaluator types
+    if (category === 'suits') {
+      // For suits evaluator, use detectExclusionFlags
+      const exclusionFlags = evaluator.detectExclusionFlags(app.text);
+      console.log('🚫 Detected Exclusion Flags:', exclusionFlags);
+    } else {
+      // For developer/creative evaluators, use detectSkills
+      const skills = evaluator.detectSkills(app.text);
+      console.log('🔍 Detected Skills:', skills);
+    }
 
     console.log('\n📊 Data Structure:');
     console.log(JSON.stringify({
@@ -56,7 +63,10 @@ function debugApplicationData(applications, evaluator) {
       email: app.email,
       textAvailable: Boolean(app.text),
       textLength: app.text?.length || 0,
-      detectedSkills: Array.from(skills)
+      ...(category === 'suits' 
+        ? { detectedExclusionFlags: Array.from(evaluator.detectExclusionFlags(app.text)) }
+        : { detectedSkills: Array.from(evaluator.detectSkills(app.text)) }
+      )
     }, null, 2));
     console.log('----------------------------------------\n');
   });
@@ -101,7 +111,7 @@ app.post('/api/filter-resumes', async (req, res) => {
     }
 
     // Debug incoming data
-    debugApplicationData(applications, evaluator);
+    debugApplicationData(applications, evaluator, category);
     
     // Pass position_type to the evaluator
     const completion = await openai.chat.completions.create(
