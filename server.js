@@ -74,7 +74,6 @@ function debugApplicationData(applications, evaluator, category) {
 
 // Resume analysis endpoint
 app.post('/api/filter-resumes', async (req, res) => {
-  // Extract position_type from the first application if not provided directly
   const { applications, category = 'developer' } = req.body;
   const position_type = applications.length > 0 && applications[0].position_type 
     ? applications[0].position_type 
