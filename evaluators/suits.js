@@ -80,34 +80,37 @@ function generatePrompt(applications) {
 			{
 				role: "system",
 				content:
-					"You are a client servicing role evaluator. You focus on identifying candidates suitable for client-facing roles while flagging those with finance backgrounds.",
+					"You are a client servicing role evaluator. You focus on identifying candidates suitable for client-facing roles while penalizing those with finance backgrounds.",
 			},
 			{
 				role: "user",
-				content: `Evaluate these candidates for client servicing roles. I've detected exclusion flags (finance-related keywords) for each candidate.
+				content: `Evaluate ALL ${applications.length} candidates for client servicing roles. I've detected exclusion flags (finance-related keywords) for each candidate.
   
   Important rules:
-  1. Rate candidates based on client-facing experience and communication skills
-  2. Apply penalties for candidates with finance backgrounds (detected exclusion flags)
-  3. In keySkills, list ONLY the detected exclusion flags (finance-related keywords found)
-  4. In strengths, list client-facing strengths and positive attributes
-  5. Lower rating if many exclusion flags are present
+  1. EVALUATE ALL CANDIDATES - return all ${applications.length} candidates in rankings array
+  2. Rate candidates based on client-facing experience and communication skills
+  3. Apply penalties for candidates with finance backgrounds (detected exclusion flags)
+  4. In keySkills, list ONLY the detected exclusion flags (finance-related keywords found)
+  5. In summary, provide YOUR detailed assessment of each candidate's suitability for client servicing
+  6. In strengths, list client-facing strengths and positive attributes
+  7. Sort rankings by rating (highest first), then by exclusion flag count (fewer flags ranked higher)
   
   Rating system with penalties:
   - Base rating 1-5 based on client servicing suitability
-  - Apply -0.5 to -2 penalty for exclusion flags:
+  - Apply penalty for exclusion flags:
     - 1-2 flags: -0.5 penalty
     - 3-4 flags: -1.0 penalty  
     - 5+ flags: -2.0 penalty
+  - Minimum rating after penalty: 1.0
   
-  Return JSON:
+  Return JSON with ALL candidates:
   {
     "rankings": [
       {
         "id": number,
         "rating": number (1-5, after penalty),
-        "summary": "Client servicing suitability assessment",
-        "keySkills": ["list", "of", "detected", "exclusion", "flags"],
+        "summary": "YOUR detailed assessment of this candidate's client servicing suitability",
+        "keySkills": ["detected", "exclusion", "flags", "only"],
         "strengths": ["client-facing", "communication", "strengths"],
         "improvements": ["areas", "for", "development"]
       }
