@@ -22,6 +22,7 @@ const openai = new OpenAI({
 // Import evaluators
 const developerEvaluator = require('./evaluators/developer');
 const creativeEvaluator = require('./evaluators/creative');
+const suitsEvaluator = require('./evaluators/suits');
 
 // Health check endpoint
 app.get('/', (req, res) => {
@@ -89,6 +90,9 @@ app.post('/api/filter-resumes', async (req, res) => {
       case 'creative':
         evaluator = creativeEvaluator;
         break;
+      case 'suits':
+        evaluator = suitsEvaluator;
+        break;
       default:
         return res.status(400).json({
           error: 'Invalid category',
@@ -101,7 +105,9 @@ app.post('/api/filter-resumes', async (req, res) => {
     
     // Pass position_type to the evaluator
     const completion = await openai.chat.completions.create(
-      evaluator.generatePrompt(applications, position_type)
+      category === 'suits' 
+        ? evaluator.generatePrompt(applications)
+        : evaluator.generatePrompt(applications, position_type)
     );
 
     console.log('\n=== GPT Response ===\n');
@@ -113,14 +119,20 @@ app.post('/api/filter-resumes', async (req, res) => {
     const verifiedRankings = {
       rankings: rankings.rankings.map(ranking => {
         const app = applications.find(a => a.id === ranking.id);
-        const detectedSkills = Array.from(evaluator.detectSkills(app.text));
         
-        return {
-          ...ranking,
-          keySkills: ranking.keySkills.filter(skill => 
-            detectedSkills.includes(skill.toLowerCase())
-          )
-        };
+        if (category === 'suits') {
+          // For suits, we don't filter keySkills since it uses exclusion logic
+          return ranking;
+        } else {
+          // For developer/creative, filter keySkills as before
+          const detectedSkills = Array.from(evaluator.detectSkills(app.text));
+          return {
+            ...ranking,
+            keySkills: ranking.keySkills.filter(skill => 
+              detectedSkills.includes(skill.toLowerCase())
+            )
+          };
+        }
       })
     };
 
